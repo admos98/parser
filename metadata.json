@@ -1,0 +1,6 @@
+{
+  "name": "ExaParse Pro - Offline Mixed-Language Exam Parser",
+  "description": "Production-grade offline parser, AST visualizer, and workbench for Persian, Arabic, and English exams with clean JSON and Excel export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
