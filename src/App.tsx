@@ -3,26 +3,33 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { Header } from './components/Header';
-import { TabsNav } from './components/TabsNav';
-import { QuestionBankView } from './components/QuestionBankView';
-import { DocumentViewer } from './components/DocumentViewer';
-import { ContextGraphView } from './components/ContextGraphView';
-import { AnomalyInspector } from './components/AnomalyInspector';
-import { ArchitectureGuide } from './components/ArchitectureGuide';
-import { ExportModal } from './components/ExportModal';
-import { UploaderModal } from './components/UploaderModal';
-import { BatchProcessingModal } from './components/BatchProcessingModal';
-import { QuestionDetailModal } from './components/QuestionDetailModal';
-import { PassageModal } from './components/PassageModal';
-import { BUSHEHR_GRADE12_EXAM, MOTAHARI_GRADE9_EXAM } from './data/sampleExamData';
-import { MOTAHARI_STAGE1_OFFLINE, BUSHEHR_STAGE1_OFFLINE, createOfflineUnsolvedDocument } from './data/offlineSampleData';
-import { PipelineStageBanner } from './components/PipelineStageBanner';
-import { ExamDocument, QuestionItem } from './types/exam';
+import React, { useState, useEffect } from 'react';
+import { Sidebar, ScreenId } from './components/Sidebar';
+import { DashboardScreen } from './components/DashboardScreen';
+import { ParseScreen } from './components/ParseScreen';
+import { BatchScreen } from './components/BatchScreen';
+import { LibraryScreen } from './components/LibraryScreen';
+import { SettingsScreen } from './components/SettingsScreen';
+import { ExamDetailScreen } from './components/ExamDetailScreen';
+import { ExamDocument } from './types/exam';
+import { ProviderConfig, DEFAULT_PROVIDER_CONFIG } from './types/settings';
+import {
+  loadExams,
+  saveExams,
+  saveExam,
+  deleteExam as deleteExamFromDb,
+  loadSettings,
+  saveSettings,
+} from './utils/storage';
+import { MOTAHARI_STAGE1_OFFLINE, BUSHEHR_STAGE1_OFFLINE } from './data/offlineSampleData';
+import { MOTAHARI_GRADE9_EXAM, BUSHEHR_GRADE12_EXAM } from './data/sampleExamData';
 
 export default function App() {
-  // Multi-Exam Store: Default starts in Stage 1 (Raw Offline Extracted, No Answers!)
+  const [currentScreen, setCurrentScreen] = useState<ScreenId>('dashboard');
+  const [parseInitialTab, setParseInitialTab] = useState<string>('upload');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+
+  // Persistent Multi-Exam Store
   const [documents, setDocuments] = useState<ExamDocument[]>([
     MOTAHARI_STAGE1_OFFLINE,
     MOTAHARI_GRADE9_EXAM,
@@ -30,237 +37,196 @@ export default function App() {
     BUSHEHR_GRADE12_EXAM,
   ]);
   const [activeDocumentId, setActiveDocumentId] = useState<string>(MOTAHARI_STAGE1_OFFLINE.id);
-  const [activeTab, setActiveTab] = useState<string>('questions');
+
+  // Persistent Settings
+  const [providerConfig, setProviderConfig] = useState<ProviderConfig>(DEFAULT_PROVIDER_CONFIG);
   const [isSolvingAi, setIsSolvingAi] = useState<boolean>(false);
 
-  // Modals state
-  const [showExportModal, setShowExportModal] = useState<boolean>(false);
-  const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
-  const [showBatchModal, setShowBatchModal] = useState<boolean>(false);
-  const [editingQuestion, setEditingQuestion] = useState<QuestionItem | null>(null);
-  const [viewingPassage, setViewingPassage] = useState<{ title: string; text: string } | null>(null);
+  // Load from IndexedDB / Storage on startup
+  useEffect(() => {
+    async function initStorage() {
+      try {
+        const [savedExams, savedSettings] = await Promise.all([
+          loadExams(),
+          loadSettings(),
+        ]);
+        if (savedExams && savedExams.length > 0) {
+          setDocuments(savedExams);
+          setActiveDocumentId(savedExams[0].id);
+        }
+        if (savedSettings) {
+          setProviderConfig(savedSettings);
+        }
+      } catch (e) {
+        console.warn('Storage initialization error:', e);
+      }
+    }
+    initStorage();
+  }, []);
 
-  // Active Document
-  const currentDocument =
-    documents.find((d) => d.id === activeDocumentId) || documents[0];
+  const activeDocument = documents.find((d) => d.id === activeDocumentId) || documents[0];
 
-  // Run Stage 2: AI Solving on the currently parsed offline document!
-  const handleSolveCurrentWithAi = async () => {
+  // Navigate helper
+  const handleNavigate = (screen: ScreenId, initialTab?: string) => {
+    if (initialTab) {
+      setParseInitialTab(initialTab);
+    }
+    setCurrentScreen(screen);
+  };
+
+  // Select an exam and open its Exam Detail screen
+  const handleSelectExam = (examId: string) => {
+    setActiveDocumentId(examId);
+    setCurrentScreen('detail');
+  };
+
+  // Add parsed exam(s) to store & storage
+  const handleExamParsed = (newExam: ExamDocument) => {
+    setDocuments((prev) => {
+      const filtered = prev.filter((d) => d.id !== newExam.id);
+      const next = [newExam, ...filtered];
+      saveExam(newExam);
+      return next;
+    });
+    setActiveDocumentId(newExam.id);
+    setCurrentScreen('detail');
+  };
+
+  const handleAddBatchExams = (newExams: ExamDocument[]) => {
+    setDocuments((prev) => {
+      const existingIds = new Set(newExams.map((e) => e.id));
+      const remaining = prev.filter((d) => !existingIds.has(d.id));
+      const next = [...newExams, ...remaining];
+      saveExams(next);
+      return next;
+    });
+  };
+
+  const handleUpdateDocument = (updated: ExamDocument) => {
+    setDocuments((prev) => {
+      const next = prev.map((d) => (d.id === updated.id ? updated : d));
+      saveExam(updated);
+      return next;
+    });
+  };
+
+  const handleDeleteDocument = (id: string) => {
+    setDocuments((prev) => {
+      const next = prev.filter((d) => d.id !== id);
+      deleteExamFromDb(id);
+      return next;
+    });
+    if (activeDocumentId === id && documents.length > 1) {
+      const remaining = documents.filter((d) => d.id !== id);
+      setActiveDocumentId(remaining[0]?.id || '');
+    }
+  };
+
+  // Save Settings
+  const handleSaveSettings = async (newConfig: ProviderConfig) => {
+    setProviderConfig(newConfig);
+    await saveSettings(newConfig);
+  };
+
+  // Solve with AI using configured provider
+  const handleSolveWithAi = async (doc: ExamDocument) => {
     setIsSolvingAi(true);
     try {
-      // If it's already based on the solved reference, we can instant-solve or hit the backend
       const res = await fetch('/api/solve-parsed-exam', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ document: currentDocument }),
+        body: JSON.stringify({
+          document: doc,
+          providerConfig,
+        }),
       });
 
       if (res.ok) {
         const data = await res.json();
         const solvedDoc = data.document;
-        setDocuments((prev) =>
-          prev.map((d) => (d.id === currentDocument.id ? solvedDoc : d)),
-        );
+        handleUpdateDocument(solvedDoc);
       } else {
-        // Fallback to reference solved representation
-        const refSolved = currentDocument.filename.includes('Motahari')
-          ? MOTAHARI_GRADE9_EXAM
-          : BUSHEHR_GRADE12_EXAM;
-        setDocuments((prev) =>
-          prev.map((d) => (d.id === currentDocument.id ? { ...refSolved, id: d.id, isAiSolved: true, parseStage: 'stage2_ai_solved' } : d)),
-        );
+        const errData = await res.json().catch(() => ({}));
+        alert(`AI Solve failed: ${errData.error || res.statusText}`);
       }
-    } catch (e) {
-      const refSolved = currentDocument.filename.includes('Motahari')
-        ? MOTAHARI_GRADE9_EXAM
-        : BUSHEHR_GRADE12_EXAM;
-      setDocuments((prev) =>
-        prev.map((d) => (d.id === currentDocument.id ? { ...refSolved, id: d.id, isAiSolved: true, parseStage: 'stage2_ai_solved' } : d)),
-      );
+    } catch (e: any) {
+      alert(`Network error during solve: ${e.message}`);
     } finally {
       setIsSolvingAi(false);
     }
   };
 
-  // Revert active document back to Stage 1 (Raw offline extracted, no answers)
-  const handleRevertToOfflineRaw = () => {
-    const raw = createOfflineUnsolvedDocument(currentDocument);
-    setDocuments((prev) =>
-      prev.map((d) => (d.id === currentDocument.id ? { ...raw, id: d.id } : d)),
-    );
-  };
-
-  // Handle anomaly resolution
-  const handleResolveAnomaly = (anomalyId: string) => {
-    setDocuments((prev) =>
-      prev.map((doc) => {
-        if (doc.id !== currentDocument.id) return doc;
-        const updatedAnomalies = doc.anomalies.map((a) =>
-          a.id === anomalyId ? { ...a, isResolved: true } : a,
-        );
-        const remainingUnresolved = updatedAnomalies.filter((a) => !a.isResolved).length;
-        const newScore = remainingUnresolved === 0 ? 100 : Math.min(100, doc.confidenceScore + 0.8);
-
-        return {
-          ...doc,
-          anomalies: updatedAnomalies,
-          confidenceScore: Math.round(newScore * 10) / 10,
-        };
-      }),
-    );
-  };
-
-  // Handle question edit
-  const handleSaveQuestion = (updated: QuestionItem) => {
-    setDocuments((prev) =>
-      prev.map((doc) => {
-        if (doc.id !== currentDocument.id) return doc;
-        const nextSections = doc.sections.map((sec) => {
-          if (sec.rowId !== updated.sectionRowId) return sec;
-          return {
-            ...sec,
-            questions: sec.questions.map((q) => (q.id === updated.id ? updated : q)),
-          };
-        });
-        return {
-          ...doc,
-          sections: nextSections,
-        };
-      }),
-    );
-  };
-
-  // Reset to original samples
-  const handleResetSample = () => {
-    setDocuments([
-      MOTAHARI_STAGE1_OFFLINE,
-      MOTAHARI_GRADE9_EXAM,
-      BUSHEHR_STAGE1_OFFLINE,
-      BUSHEHR_GRADE12_EXAM,
-    ]);
-    setActiveDocumentId(MOTAHARI_STAGE1_OFFLINE.id);
-  };
-
-  // Add parsed batch documents to store
-  const handleAddBatchDocuments = (newDocs: ExamDocument[]) => {
-    setDocuments((prev) => [...prev, ...newDocs]);
-    if (newDocs.length > 0) {
-      setActiveDocumentId(newDocs[0].id);
-    }
-  };
-
-  const unresolvedCount = currentDocument.anomalies.filter((a) => !a.isResolved).length;
-
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
-      {/* Top Header */}
-      <Header
-        document={currentDocument}
-        documents={documents}
-        activeDocumentId={activeDocumentId}
-        onSelectDocument={(id) => setActiveDocumentId(id)}
-        activeTab={activeTab}
-        onSelectTab={setActiveTab}
-        onOpenUpload={() => setShowUploadModal(true)}
-        onOpenExport={() => setShowExportModal(true)}
-        onOpenBatch={() => setShowBatchModal(true)}
-        onResetSample={handleResetSample}
+    <div className="flex h-screen bg-slate-950 text-slate-100 font-sans selection:bg-indigo-500 selection:text-white overflow-hidden">
+      {/* Persistent Collapsible Sidebar */}
+      <Sidebar
+        currentScreen={currentScreen}
+        onNavigate={(screen) => handleNavigate(screen)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+        providerConfig={providerConfig}
+        totalExams={documents.length}
       />
 
-      {/* Tabs Navigation */}
-      <TabsNav
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        anomaliesCount={unresolvedCount}
-        totalQuestions={currentDocument.totalQuestions}
-      />
+      {/* Main Screen Body */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <main className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+          {currentScreen === 'dashboard' && (
+            <DashboardScreen
+              exams={documents}
+              providerConfig={providerConfig}
+              onNavigate={handleNavigate}
+              onSelectExam={handleSelectExam}
+            />
+          )}
 
-      {/* Main View Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-        {/* Stage 1 vs Stage 2 Pipeline Banner */}
-        <PipelineStageBanner
-          document={currentDocument}
-          onSolveWithAi={handleSolveCurrentWithAi}
-          onResetToOffline={handleRevertToOfflineRaw}
-          isSolving={isSolvingAi}
-        />
+          {currentScreen === 'parse' && (
+            <ParseScreen
+              initialTab={parseInitialTab}
+              providerConfig={providerConfig}
+              onExamParsed={handleExamParsed}
+            />
+          )}
 
-        {activeTab === 'questions' && (
-          <QuestionBankView
-            document={currentDocument}
-            onEditQuestion={(q) => setEditingQuestion(q)}
-            onSelectPassage={(title, text) => setViewingPassage({ title, text })}
-          />
-        )}
+          {currentScreen === 'batch' && (
+            <BatchScreen
+              providerConfig={providerConfig}
+              onAddExamsToLibrary={handleAddBatchExams}
+              onOpenExamDetail={handleSelectExam}
+            />
+          )}
 
-        {activeTab === 'document' && (
-          <DocumentViewer
-            document={currentDocument}
-            onSelectQuestion={(q) => setEditingQuestion(q)}
-          />
-        )}
+          {currentScreen === 'library' && (
+            <LibraryScreen
+              exams={documents}
+              providerConfig={providerConfig}
+              onSelectExam={handleSelectExam}
+              onUpdateExam={handleUpdateDocument}
+              onDeleteExam={handleDeleteDocument}
+              onImportExams={handleAddBatchExams}
+              onSolveExam={handleSolveWithAi}
+            />
+          )}
 
-        {activeTab === 'context' && (
-          <ContextGraphView
-            document={currentDocument}
-            onSelectQuestion={(q) => setEditingQuestion(q)}
-          />
-        )}
+          {currentScreen === 'settings' && (
+            <SettingsScreen
+              config={providerConfig}
+              onSaveConfig={handleSaveSettings}
+            />
+          )}
 
-        {activeTab === 'anomalies' && (
-          <AnomalyInspector
-            document={currentDocument}
-            onResolveAnomaly={handleResolveAnomaly}
-            onSelectTab={setActiveTab}
-          />
-        )}
-
-        {activeTab === 'architecture' && <ArchitectureGuide />}
-      </main>
-
-      {/* Modals */}
-      {showExportModal && (
-        <ExportModal
-          document={currentDocument}
-          documents={documents}
-          onClose={() => setShowExportModal(false)}
-        />
-      )}
-
-      {showUploadModal && (
-        <UploaderModal
-          onClose={() => setShowUploadModal(false)}
-          onLoadExam={(exam) => {
-            setDocuments((prev) => [exam, ...prev]);
-            setActiveDocumentId(exam.id);
-            setActiveTab('questions');
-          }}
-        />
-      )}
-
-      {showBatchModal && (
-        <BatchProcessingModal
-          existingDocuments={documents}
-          onClose={() => setShowBatchModal(false)}
-          onAddDocuments={handleAddBatchDocuments}
-        />
-      )}
-
-      {editingQuestion && (
-        <QuestionDetailModal
-          question={editingQuestion}
-          onSave={handleSaveQuestion}
-          onClose={() => setEditingQuestion(null)}
-        />
-      )}
-
-      {viewingPassage && (
-        <PassageModal
-          title={viewingPassage.title}
-          text={viewingPassage.text}
-          onClose={() => setViewingPassage(null)}
-        />
-      )}
+          {currentScreen === 'detail' && activeDocument && (
+            <ExamDetailScreen
+              document={activeDocument}
+              allDocuments={documents}
+              onBackToLibrary={() => setCurrentScreen('library')}
+              onUpdateDocument={handleUpdateDocument}
+              onSolveWithAi={handleSolveWithAi}
+              isSolvingAi={isSolvingAi}
+            />
+          )}
+        </main>
+      </div>
     </div>
   );
 }

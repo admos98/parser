@@ -206,7 +206,7 @@ export function exportToExcel(doc: ExamDocument): void {
 /**
  * Export BATCH of all exams into a unified multi-sheet Excel (.xlsx) file
  */
-export function exportBatchToExcel(documents: ExamDocument[]): void {
+export function exportBatchToExcel(documents: ExamDocument[], customFilename?: string): void {
   const wb = XLSX.utils.book_new();
 
   // Master Sheet: Consolidated Questions across ALL exams
@@ -281,8 +281,10 @@ export function exportBatchToExcel(documents: ExamDocument[]): void {
   const blob = new Blob([excelBuffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
-  downloadFile(blob, `Batch_Exams_Export_${documents.length}_Files.xlsx`, blob.type);
+  downloadFile(blob, customFilename || `Batch_Exams_Export_${documents.length}_Files.xlsx`, blob.type);
 }
+
+export const exportExamToExcel = exportToExcel;
 
 /**
  * Export single exam as CSV

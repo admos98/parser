@@ -79,9 +79,10 @@ export function parseExamRawText(
 
 /**
  * Header boundary lookahead labels: prevents fields on the same line from swallowing adjacent fields.
+ * Crucial fix: دبیر only matches as standalone label or "نام دبیر", never slicing inside "دبیرستان".
  */
 const HEADER_BOUNDARY =
-  '(?=\\s*(?:نام\\s*درس|درس|مدت\\s*آزمون|مدت|تاریخ\\s*آزمون|تاریخ|نام\\s*دبیر|دبیر|نام\\s*مدرسه|مدرسه|دبیرستان|هنرستان|آموزشگاه|اداره\\s*کل|اداره\\s*آموزش\\s*و\\s*پرورش|اداره|مقطع\\s*و\\s*رشته|مقطع|رشته|پایه|تعداد\\s*صفحه|صفحه|نوبت|سال\\s*تحصیلی|Subject|Course|Duration|Time|Date|Teacher|School|District|Grade|Pages)|\\r?\\n|$)';
+  '(?=\\s*(?:نام\\s*درس|درس|مدت\\s*آزمون|مدت|تاریخ\\s*آزمون|تاریخ|نام\\s*دبیر|(?:\bدبیر\b(?!\\s*ستان))|نام\\s*مدرسه|مدرسه|دبیرستان|هنرستان|آموزشگاه|اداره\\s*کل|اداره\\s*آموزش\\s*و\\s*پرورش|اداره|مقطع\\s*و\\s*رشته|مقطع|رشته|پایه|تعداد\\s*صفحه|صفحه|نوبت|سال\\s*تحصیلی|Subject|Course|Duration|Time|Date|Teacher|School|District|Grade|Pages)|\\r?\\n|$)';
 
 function extractHeaderField(text: string, labelRegex: RegExp): string | null {
   const fullPattern = new RegExp(labelRegex.source + `\\s*[:：]?\\s*([^\\n\\r]+?)` + HEADER_BOUNDARY, 'i');
@@ -100,7 +101,8 @@ function extractExamHeader(text: string): ExamHeader {
   const schoolMatch = extractHeaderField(text, /(?:نام\s*مدرسه|نام\s*آموزشگاه|دبیرستان|هنرستان|مدرسه|School)/);
   const districtMatch = extractHeaderField(text, /(?:اداره\s*کل\s*آموزش\s*و\s*پرورش|اداره\s*آموزش\s*و\s*پرورش|اداره|مدیریت\s*آموزش\s*و\s*پرورش|District)/);
   const gradeMatch = extractHeaderField(text, /(?:مقطع\s*و\s*رشته|مقطع|پایه\s*و\s*رشته|رشته|پایه|Grade)/);
-  const teacherMatch = extractHeaderField(text, /(?:نام\s*دبیر|دبیر|طراح\s*سوال|مصحح|Teacher)/);
+  // Match standalone "نام دبیر" or "دبیر:" without matching the "دبیر" substring of "دبیرستان"
+  const teacherMatch = extractHeaderField(text, /(?:نام\s*دبیر|طراح\s*سوال|مصحح|Teacher|(?:\bدبیر\b(?!\s*ستان)))/);
   const pageMatch = extractHeaderField(text, /(?:تعداد\s*صفحه|تعداد\s*صفحات|صفحه|Pages)/);
 
   // Extract duration number
@@ -146,8 +148,10 @@ interface RawSectionBlock {
  * Trailing marks on the header line (e.g. "A Choose the correct answer 2") are accurately parsed.
  */
 function splitIntoRawSections(text: string): RawSectionBlock[] {
-  // Common Iranian exam table layout has Row identifiers A..Q in column 1
-  const rowPattern = /(?:^|\n)\s*([A-Q])[\.\s]+([^\n]+)/gi;
+  // Common Iranian exam table layout has Row identifiers A..Q in column 1.
+  // Crucial fix: Do NOT use case-insensitive 'i' flag! Uppercase [A-Q] only.
+  // Lowercase 'a.' / 'b.' are multiple choice options belonging to questions, not section headers!
+  const rowPattern = /(?:^|\n)\s*([A-Q])[\.\s]+(?![a-d][\.\)])([^\n]+)/g;
   const matches = Array.from(text.matchAll(rowPattern));
 
   if (matches.length === 0) {
@@ -544,7 +548,8 @@ function extractQuestionsFromText(
   const items: QuestionItem[] = [];
 
   // Question numbering regex: "1. ...", "1) ...", "27. ...", "31. Did Alexander Flemming 44..."
-  const itemRegex = /(?:^|\n)\s*(\d+)[\.\)]\s*([^\n\r]+(?:\n(?!\s*\d+[\.\)]|[A-Q][\.\s])[^\n\r]+)*)/g;
+  // Keep reading subsequent lines (including option lines a. b. c. d.) until the next numbered question or uppercase section header
+  const itemRegex = /(?:^|\n)\s*(\d+)[\.\)]\s*([^\n\r]+(?:\n(?!\s*\d+[\.\)]|\s*[A-Q][\.\s]+(?![a-d][\.\)]))[^\n\r]+)*)/g;
   const matches = Array.from(text.matchAll(itemRegex));
 
   for (let i = 0; i < matches.length; i++) {
