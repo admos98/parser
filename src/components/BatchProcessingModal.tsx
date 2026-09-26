@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { ExamDocument } from '../types/exam';
 import { exportBatchToExcel, exportBatchToJson } from '../utils/exporter';
+import { parseExamRawText } from '../utils/parserEngine';
+import { extractTextFromFile } from '../utils/fileExtractor';
 
 interface BatchProcessingModalProps {
   onClose: () => void;
@@ -72,26 +74,35 @@ export const BatchProcessingModal: React.FC<BatchProcessingModalProps> = ({
 
       try {
         const item = queue[i];
-        const base64Data = await readFileAsBase64(item.file);
-        const mimeType = item.file.type || 'application/pdf';
+        let parsedDoc: ExamDocument | null = null;
 
-        const res = await fetch('/api/parse-exam', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            filename: item.name,
-            fileData: base64Data,
-            mimeType,
-          }),
-        });
+        try {
+          const base64Data = await readFileAsBase64(item.file);
+          const mimeType = item.file.type || 'application/pdf';
 
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || `Server responded with ${res.status}`);
+          const res = await fetch('/api/parse-exam', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filename: item.name,
+              fileData: base64Data,
+              mimeType,
+            }),
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            parsedDoc = data.document;
+          }
+        } catch (serverErr) {
+          console.warn('Server batch parse failed, using offline AST extraction:', serverErr);
         }
 
-        const data = await res.json();
-        const parsedDoc: ExamDocument = data.document;
+        // If server failed or unavailable, use offline engine
+        if (!parsedDoc) {
+          const extractedText = await extractTextFromFile(item.file);
+          parsedDoc = parseExamRawText(extractedText, item.name);
+        }
 
         successfullyParsed.push(parsedDoc);
 

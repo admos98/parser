@@ -10,6 +10,7 @@ import {
   CheckCircle,
 } from 'lucide-react';
 import { parseExamRawText } from '../utils/parserEngine';
+import { extractTextFromFile } from '../utils/fileExtractor';
 import { BUSHEHR_GRADE12_EXAM, MOTAHARI_GRADE9_EXAM } from '../data/sampleExamData';
 import { ExamDocument } from '../types/exam';
 
@@ -23,87 +24,111 @@ export const UploaderModal: React.FC<UploaderModalProps> = ({ onClose, onLoadExa
   const [pastedText, setPastedText] = useState('');
   const [customFileName, setCustomFileName] = useState('custom_exam.txt');
   const [loading, setLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string>('');
+  const [offlineOnly, setOfflineOnly] = useState<boolean>(true);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setLoading(true);
-    try {
-      // First attempt server-side native AI parsing to solve answer keys
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve) => {
-        reader.onload = () => {
-          const res = reader.result as string;
-          resolve(res.split(',')[1] || res);
-        };
-        reader.readAsDataURL(file);
-      });
+    setStatusMessage('Reading and extracting text from file...');
 
-      const base64 = await base64Promise;
-      const mimeType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'text/plain');
+    // If not offline-only, try server AI first
+    if (!offlineOnly) {
+      try {
+        setStatusMessage('Attempting Stage 2 AI server parsing...');
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve) => {
+          reader.onload = () => {
+            const res = reader.result as string;
+            resolve(res.split(',')[1] || res);
+          };
+          reader.readAsDataURL(file);
+        });
 
-      const response = await fetch('/api/parse-exam', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: file.name,
-          fileData: base64,
-          mimeType,
-        }),
-      });
+        const base64 = await base64Promise;
+        const mimeType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'text/plain');
 
-      if (response.ok) {
-        const data = await response.json();
-        onLoadExam(data.document);
-        onClose();
-        return;
+        const response = await fetch('/api/parse-exam', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            fileData: base64,
+            mimeType,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          onLoadExam(data.document);
+          onClose();
+          return;
+        }
+      } catch (err) {
+        console.warn('Server AI parse failed or unavailable, falling back to offline AST engine:', err);
       }
-    } catch (e) {
-      console.warn('Server AI parse failed or unavailable, falling back to local deterministic AST:', e);
     }
 
-    // Fallback: local text parsing
-    const textReader = new FileReader();
-    textReader.onload = (event) => {
-      const content = event.target?.result as string;
-      const parsed = parseExamRawText(content, file.name);
+    // Offline Extraction Path:
+    // Extract text from DOCX (unzipping word/document.xml), PDF (via pdf.js), or plain text
+    try {
+      setStatusMessage(`Extracting text from ${file.name.endsWith('.docx') ? 'Word DOCX XML' : file.name.endsWith('.pdf') ? 'PDF pages' : 'text stream'}...`);
+      const extractedText = await extractTextFromFile(file);
+
+      if (!extractedText || extractedText.trim().length === 0) {
+        throw new Error('Extracted text was empty. For scanned image-only PDFs, please provide an OCR text file.');
+      }
+
+      setStatusMessage('Parsing exam AST with offline rule-based engine...');
+      const parsed = parseExamRawText(extractedText, file.name);
       onLoadExam(parsed);
       onClose();
+    } catch (err: any) {
+      console.error('Offline file extraction error:', err);
+      alert(`Error extracting text: ${err.message || 'Unknown extraction error'}`);
+    } finally {
       setLoading(false);
-    };
-    textReader.readAsText(file);
+      setStatusMessage('');
+    }
   };
 
   const handleParsePasted = async () => {
     if (!pastedText.trim()) return;
     setLoading(true);
+    setStatusMessage('Parsing pasted text...');
     try {
-      const response = await fetch('/api/parse-exam', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: customFileName,
-          rawText: pastedText,
-        }),
-      });
+      if (!offlineOnly) {
+        try {
+          setStatusMessage('Parsing with Stage 2 AI server...');
+          const response = await fetch('/api/parse-exam', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filename: customFileName,
+              rawText: pastedText,
+            }),
+          });
 
-      if (response.ok) {
-        const data = await response.json();
-        onLoadExam(data.document);
-        onClose();
-        return;
+          if (response.ok) {
+            const data = await response.json();
+            onLoadExam(data.document);
+            onClose();
+            return;
+          }
+        } catch (e) {
+          console.warn('AI endpoint unavailable, using offline AST parser');
+        }
       }
-    } catch (e) {
-      console.warn('AI endpoint unavailable, using offline AST parser');
-    }
 
-    try {
+      setStatusMessage('Parsing with Stage 1 Offline AST engine...');
       const parsed = parseExamRawText(pastedText, customFileName);
       onLoadExam(parsed);
       onClose();
     } finally {
       setLoading(false);
+      setStatusMessage('');
     }
   };
 
@@ -246,23 +271,55 @@ export const UploaderModal: React.FC<UploaderModalProps> = ({ onClose, onLoadExa
 
           {activeTab === 'upload' && (
             <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs">
+                <div>
+                  <span className="font-semibold text-slate-200">Parsing Engine:</span>
+                  <span className="text-slate-400 ml-2">
+                    {offlineOnly ? 'Stage 1: Pure Offline AST (DOCX XML / PDF.js)' : 'Stage 2: Server AI Auto-Solve'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOfflineOnly(!offlineOnly)}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
+                    offlineOnly
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                  }`}
+                >
+                  {offlineOnly ? 'Offline Rule AST (Active)' : 'AI Model (Active)'}
+                </button>
+              </div>
+
               <div className="border-2 border-dashed border-slate-700 hover:border-indigo-500 rounded-2xl p-8 text-center space-y-3 transition bg-slate-950/40">
                 <div className="w-12 h-12 rounded-full bg-indigo-600/10 text-indigo-400 flex items-center justify-center mx-auto">
                   <Upload className="w-6 h-6" />
                 </div>
                 <div>
-                  <label className="cursor-pointer text-sm font-semibold text-indigo-400 hover:text-indigo-300">
-                    <span>Click to browse exam file</span>
-                    <input
-                      type="file"
-                      accept=".txt,.docx,.pdf,.ocr,.json"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                    />
-                  </label>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Supports `.txt`, `.docx`, `.pdf`, or OCR stream dump
-                  </p>
+                  {loading ? (
+                    <div className="space-y-2">
+                      <div className="text-sm font-semibold text-indigo-400 animate-pulse">
+                        {statusMessage || 'Processing document...'}
+                      </div>
+                      <p className="text-xs text-slate-500">Unzipping docx / extracting pdf text layers...</p>
+                    </div>
+                  ) : (
+                    <>
+                      <label className="cursor-pointer text-sm font-semibold text-indigo-400 hover:text-indigo-300">
+                        <span>Click to browse exam file</span>
+                        <input
+                          type="file"
+                          accept=".txt,.docx,.pdf,.ocr,.json"
+                          onChange={handleFileUpload}
+                          className="hidden"
+                          disabled={loading}
+                        />
+                      </label>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Native support for `.docx` (word/document.xml), `.pdf` (pdf.js), `.txt`, or OCR dumps
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

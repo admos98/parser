@@ -31,6 +31,7 @@ export interface QuestionItem {
   id: string;
   number: number | string;
   displayNumber: string;
+  originalNumber?: number | string;
   sectionRowId: string; // e.g. 'A', 'B', 'D', 'P', 'Q'
   sectionName: string; // 'Listening', 'Vocabulary', 'Grammar', 'Writing', 'Reading'
   type: QuestionType;
