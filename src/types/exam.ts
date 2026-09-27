@@ -88,6 +88,9 @@ export interface ExamHeader {
   district: string; // "اداره آموزش و پرورش خارگ - بوشهر"
   gradeAndMajor: string; // "مقطع و رشته: دوازدهم"
   pageCount: number; // 5
+  grade?: string; // e.g., "Grade 9"
+  term?: string;  // e.g., "First Term"
+  examName?: string; // Inferred by AI
 }
 
 export interface ParsingAnomaly {
@@ -112,6 +115,8 @@ export interface ExamDocument {
   totalMarks: number;
   anomalies: ParsingAnomaly[];
   confidenceScore: number; // e.g. 98.4
+  needsReview?: boolean;
+  validationFlags?: string[];
   // 2-Stage Pipeline Tracking
   parseStage?: 'stage1_offline_unsolved' | 'stage2_ai_solved';
   solvedAt?: string;

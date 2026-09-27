@@ -192,62 +192,49 @@ app.all('/api/list-models', async (req, res) => {
   }
 });
 
-// 3. PARSE EXAM ENDPOINT
-app.post('/api/parse-exam', async (req, res) => {
+// 4. ENHANCE EXAM ENDPOINT (AI Refinement)
+app.post('/api/enhance-exam', async (req, res) => {
   try {
-    const { filename, fileData, mimeType, rawText, providerConfig } = req.body;
+    const { exam, providerConfig } = req.body;
 
-    const systemPrompt = `You are an expert exam parser, curriculum specialist, and linguist specializing in Iranian, Arabic, and English high school and university examinations.
-Your task is to take an exam sheet (image, PDF, or text), meticulously extract every single section, table row (e.g. Row A, B, C... Q), question stem, option, mark, and context (word banks, cloze passages, reading passages), AND SOLVE EACH QUESTION ACCURATELY to provide the verified answer key and teacher corrections.
+    const systemPrompt = `You are an expert exam reviewer. Your task is to perform minimal, targeted JSON patching on the provided exam structure.
 
 Strict Requirements:
-1. Numbering: Keep the exact question numbers as printed on the sheet.
-2. Question Types: Classify each item as one of:
-   - "multiple_choice", "cloze_item", "word_bank_fill", "fill_blank", "matching", "true_false", "short_answer", "unscramble", "form_in_parentheses", "combine_sentences", "active_passive", "error_correction", "letter_reorder", "inline_choice", "dialogue_response"
-3. Context Linking:
-   - If there is a Word Bank box, extract candidate words and attach them to blank questions in that row.
-   - If there is a Cloze Test, extract passage text and associate each gap with its corresponding option item.
-   - If there is a Reading Comprehension passage, extract passage text and link subsequent questions to it.
-4. Solve Answer Keys: Solve each question accurately.
-5. Header: Extract courseName, schoolName, durationMinutes, examDate, district, gradeAndMajor.
-6. Output JSON only.`;
+1. Do NOT rewrite the whole exam.
+2. Infer a concise 'examName' (e.g., "Grade 9 Final Exam") and add it to the header.
+3. Validate 'grade' and 'term' fields in the header. If they seem generic or wrong based on the exam content, provide a better value.
+4. Review anomalies for ghost indexing or mis-categorized question types and provide fixed values.
+5. Return JSON only, in the format: { "fixes": { "header": { ... }, "sections": [ ... ] } }`;
 
-    let userPrompt = '';
-    if (fileData && mimeType) {
-      userPrompt = `Analyze and parse this exam document (${filename || 'uploaded_exam'}). Extract all questions, sections, marks, passages, word banks, and solve all answer keys. Return in the specified structured JSON format.`;
-    } else if (rawText) {
-      userPrompt = `Here is the exam text / OCR stream for (${filename || 'uploaded_exam'}):\n\n${rawText}\n\nParse this exam completely, identify all sections and questions, link passages and word banks, and solve the answer keys.`;
-    } else {
-      return res.status(400).json({ error: 'No fileData or rawText provided.' });
-    }
+    const userPrompt = `Review this exam and provide only necessary fixes:\n\n${JSON.stringify(exam)}`;
 
     const aiResponse = await executeAIRequest({
       systemPrompt,
       userPrompt,
-      fileData,
-      mimeType,
       providerConfig,
-      geminiSchema: EXAM_PARSE_SCHEMA,
     });
 
-    const parsedJson = aiResponse.parsedJson;
+    const refinement = aiResponse.parsedJson;
 
-    // Assign unique ID and metadata
-    const examDoc = {
-      id: `exam-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      filename: filename || 'uploaded_exam',
-      filesize: fileData ? `${Math.round((fileData.length * 0.75) / 1024)} KB` : '14 KB',
-      parsedAt: new Date().toISOString(),
+    // Apply patches to the exam document
+    const updatedExam = {
+      ...exam,
+      header: { ...exam.header, ...refinement.fixes?.header },
+      sections: exam.sections.map((section: any, idx: number) => ({
+        ...section,
+        ...(refinement.fixes?.sections?.[idx] || {}),
+      })),
       parseStage: 'stage2_ai_solved',
       isAiSolved: true,
       solvedAt: new Date().toISOString(),
-      ...parsedJson,
-      confidenceScore: parsedJson.confidenceScore || 99.0,
-      anomalies: (parsedJson.anomalies || []).map((a: any, idx: number) => ({
-        ...a,
-        id: a.id || `anom-${idx}`,
-        isResolved: a.isResolved ?? true,
-      })),
+    };
+
+    res.json({ document: updatedExam });
+  } catch (error: any) {
+    console.error('Enhance Exam Error:', error);
+    res.status(500).json({ error: error.message || 'Failed to enhance exam' });
+  }
+});
     };
 
     res.json({ success: true, document: examDoc });

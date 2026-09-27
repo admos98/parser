@@ -49,83 +49,22 @@ export const ParseScreen: React.FC<ParseScreenProps> = ({
     setStatusMessage('Reading file...');
 
     try {
-      // If "Solve with AI" is enabled and user has configured key
-      if (solveWithAi) {
-        setStatusMessage(`Sending to ${providerConfig.provider.toUpperCase()} AI model...`);
-
-        // Check if file is small enough for direct base64 transmission
-        const reader = new FileReader();
-        const base64Promise = new Promise<string>((resolve) => {
-          reader.onload = () => {
-            const res = reader.result as string;
-            resolve(res.split(',')[1] || res);
-          };
-          reader.readAsDataURL(file);
-        });
-
-        const base64 = await base64Promise;
-        const mimeType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'text/plain');
-
-        try {
-          const response = await fetch('/api/parse-exam', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              filename: file.name,
-              fileData: base64,
-              mimeType,
-              providerConfig,
-            }),
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            onExamParsed(data.document);
-            return;
-          }
-        } catch (serverErr) {
-          console.warn('AI Parse endpoint failed, falling back to offline AST engine:', serverErr);
-        }
-      }
-
-      // Offline Extraction Path:
-      // Supports .docx (unzipping word/document.xml), .pdf (digital layer or scanned canvas OCR),
-      // and image files (.png, .jpg, etc.) with pure local offline OCR!
-      setStatusMessage(`Extracting text from ${file.name}...`);
+      // Always do offline extraction first as the Foundation
+      setStatusMessage(`Foundational extraction from ${file.name}...`);
       const extractedText = await extractTextFromFile(file, (status, pct) => {
         setStatusMessage(status);
         setProgressPercent(pct);
       });
 
       if (!extractedText || extractedText.trim().length === 0) {
-        throw new Error('Extracted text was empty.');
+        throw new Error('No text could be extracted from this file.');
       }
 
-      setStatusMessage('Constructing exam AST with deterministic offline engine...');
-      const parsedDoc = parseExamRawText(extractedText, file.name);
-
-      // If user requested AI solve and server is available, attempt solve stage
-      if (solveWithAi) {
-        try {
-          setStatusMessage(`Solving answer keys via ${providerConfig.provider.toUpperCase()}...`);
-          const solveRes = await fetch('/api/solve-parsed-exam', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ document: parsedDoc, providerConfig }),
-          });
-          if (solveRes.ok) {
-            const data = await solveRes.json();
-            onExamParsed(data.document);
-            return;
-          }
-        } catch (e) {
-          console.warn('Solve step failed, returning Stage 1 doc:', e);
-        }
-      }
-
-      // Return Stage 1 offline raw document
+      setStatusMessage('Parsing foundational exam structure...');
+      const exam = parseExamRawText(extractedText, file.name);
+      
       onExamParsed({
-        ...parsedDoc,
+        ...exam,
         parseStage: 'stage1_offline_unsolved',
         isAiSolved: false,
       });
@@ -147,24 +86,6 @@ export const ParseScreen: React.FC<ParseScreenProps> = ({
 
     try {
       const parsed = parseExamRawText(pastedText, customFileName);
-
-      if (solveWithAi) {
-        try {
-          setStatusMessage(`Solving answer keys with ${providerConfig.provider.toUpperCase()}...`);
-          const solveRes = await fetch('/api/solve-parsed-exam', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ document: parsed, providerConfig }),
-          });
-          if (solveRes.ok) {
-            const data = await solveRes.json();
-            onExamParsed(data.document);
-            return;
-          }
-        } catch (e) {
-          console.warn('Solve failed, falling back to offline raw', e);
-        }
-      }
 
       onExamParsed({
         ...parsed,

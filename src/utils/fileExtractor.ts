@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
 import * as pdfjsLib from 'pdfjs-dist';
 import { createWorker } from 'tesseract.js';
+import { preprocessImageForOcr, normalizeOcrText } from './ocrPreprocessor';
 
 // Configure PDF.js worker for browser execution
 if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
@@ -21,14 +22,41 @@ export async function runOfflineOcr(
   imageSource: string | HTMLCanvasElement | Blob | File,
   onProgress?: OcrProgressCallback,
 ): Promise<string> {
-  onProgress?.('Initializing local offline OCR engine (English + Persian)...', 5);
+  onProgress?.('Preparing image & initializing local offline OCR...', 5);
+
+  // Preprocess image on canvas if possible
+  let processedSource: any = imageSource;
+  if (typeof window !== 'undefined') {
+    try {
+      if (imageSource instanceof HTMLCanvasElement) {
+        processedSource = preprocessImageForOcr(imageSource);
+      } else if (imageSource instanceof Blob || imageSource instanceof File) {
+        const imgBitmap = await createImageBitmap(imageSource);
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = imgBitmap.width;
+        tempCanvas.height = imgBitmap.height;
+        const ctx = tempCanvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(imgBitmap, 0, 0);
+          processedSource = preprocessImageForOcr(tempCanvas);
+        }
+      }
+    } catch (prepErr) {
+      console.warn('Image pre-filter skipped:', prepErr);
+      processedSource = imageSource;
+    }
+  }
+
+  const localLangPath = typeof window !== 'undefined'
+    ? `${window.location.origin}/tessdata`
+    : '/tessdata';
 
   let worker: any = null;
   try {
-    // Try local /tessdata first (uncompressed or gzipped)
+    // 1. First attempt: Load local traineddata (100% offline, zero network, airplane mode)
     worker = await createWorker(['eng', 'fas'], 1, {
-      langPath: '/tessdata',
-      gzip: false,
+      langPath: localLangPath,
+      gzip: true,
       logger: (m: any) => {
         if (m.status === 'recognizing text') {
           const pct = Math.round((m.progress || 0) * 100);
@@ -39,20 +67,45 @@ export async function runOfflineOcr(
       },
     });
   } catch (localErr) {
-    console.warn('Local /tessdata load failed, attempting standard tesseract fallback:', localErr);
-    worker = await createWorker(['eng', 'fas'], 1, {
-      logger: (m: any) => {
-        if (m.status === 'recognizing text') {
-          const pct = Math.round((m.progress || 0) * 100);
-          onProgress?.(`Recognizing text (${pct}%)...`, pct);
-        }
-      },
-    });
+    console.warn('Local /tessdata load failed, attempting uncompressed or CDN fallback:', localErr);
+    try {
+      worker = await createWorker(['eng', 'fas'], 1, {
+        langPath: localLangPath,
+        gzip: false,
+        logger: (m: any) => {
+          if (m.status === 'recognizing text') {
+            const pct = Math.round((m.progress || 0) * 100);
+            onProgress?.(`Recognizing text (${pct}%)...`, pct);
+          }
+        },
+      });
+    } catch (secondErr) {
+      console.warn('Uncompressed local load failed, trying standard fallback:', secondErr);
+      worker = await createWorker(['eng', 'fas'], 1, {
+        logger: (m: any) => {
+          if (m.status === 'recognizing text') {
+            const pct = Math.round((m.progress || 0) * 100);
+            onProgress?.(`Recognizing text (${pct}%)...`, pct);
+          }
+        },
+      });
+    }
   }
 
-  const ret = await worker.recognize(imageSource);
+  // Set PSM 3 (Fully automatic page segmentation)
+  try {
+    await worker.setParameters({
+      tessedit_pageseg_mode: '3',
+    });
+  } catch {
+    // ignore
+  }
+
+  const ret = await worker.recognize(processedSource);
   await worker.terminate();
-  return ret.data.text || '';
+
+  const rawOcrText = ret.data.text || '';
+  return normalizeOcrText(rawOcrText);
 }
 
 /**
@@ -87,7 +140,7 @@ export async function extractTextFromDocx(data: ArrayBuffer): Promise<string> {
     }
 
     if (lines.length > 0) {
-      return lines.join('\n');
+      return normalizeOcrText(lines.join('\n'));
     }
   }
 
@@ -108,7 +161,7 @@ export async function extractTextFromDocx(data: ArrayBuffer): Promise<string> {
     }
   }
 
-  return lines.join('\n');
+  return normalizeOcrText(lines.join('\n'));
 }
 
 /**
@@ -157,9 +210,9 @@ export async function extractTextFromPdf(
       }
     }
 
-    // If PDF contains real text layer (>= 30 characters), return it immediately
+    // If PDF contains real text layer (>= 30 characters), normalize and return
     if (totalTextChars >= 30) {
-      return pageTexts.join('\n\n');
+      return normalizeOcrText(pageTexts.join('\n\n'));
     }
 
     // CASE: SCANNED / IMAGE-ONLY PDF DETECTED!
@@ -241,7 +294,8 @@ export async function extractTextFromFile(
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      resolve((e.target?.result as string) || '');
+      const raw = (e.target?.result as string) || '';
+      resolve(normalizeOcrText(raw));
     };
     reader.onerror = reject;
     reader.readAsText(file);
