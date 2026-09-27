@@ -30,8 +30,8 @@ export async function runOfflineOcr(
     try {
       if (imageSource instanceof HTMLCanvasElement) {
         processedSource = preprocessImageForOcr(imageSource);
-      } else if (imageSource instanceof Blob || imageSource instanceof File) {
-        const imgBitmap = await createImageBitmap(imageSource);
+      } else if (typeof imageSource !== 'string' && 'size' in imageSource) {
+        const imgBitmap = await createImageBitmap(imageSource as Blob);
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = imgBitmap.width;
         tempCanvas.height = imgBitmap.height;

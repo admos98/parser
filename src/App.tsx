@@ -128,15 +128,15 @@ export default function App() {
     await saveSettings(newConfig);
   };
 
-  // Solve with AI using configured provider
+  // Solve & Enhance with AI using configured provider
   const handleSolveWithAi = async (doc: ExamDocument) => {
     setIsSolvingAi(true);
     try {
-      const res = await fetch('/api/solve-parsed-exam', {
+      const res = await fetch('/api/enhance-exam', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          document: doc,
+          exam: doc,
           providerConfig,
         }),
       });
@@ -147,7 +147,7 @@ export default function App() {
         handleUpdateDocument(solvedDoc);
       } else {
         const errData = await res.json().catch(() => ({}));
-        alert(`AI Solve failed: ${errData.error || res.statusText}`);
+        alert(`AI Enhancement & Solve failed: ${errData.error || res.statusText}`);
       }
     } catch (e: any) {
       alert(`Network error during solve: ${e.message}`);

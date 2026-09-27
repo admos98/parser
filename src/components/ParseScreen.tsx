@@ -62,6 +62,26 @@ export const ParseScreen: React.FC<ParseScreenProps> = ({
 
       setStatusMessage('Parsing foundational exam structure...');
       const exam = parseExamRawText(extractedText, file.name);
+
+      if (solveWithAi) {
+        setStatusMessage('AI verifying structure, naming exam & solving answer keys...');
+        try {
+          const res = await fetch('/api/enhance-exam', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ exam, providerConfig }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.document) {
+              onExamParsed(data.document);
+              return;
+            }
+          }
+        } catch (aiErr) {
+          console.warn('AI enhance failed, loading offline foundation:', aiErr);
+        }
+      }
       
       onExamParsed({
         ...exam,
@@ -86,6 +106,26 @@ export const ParseScreen: React.FC<ParseScreenProps> = ({
 
     try {
       const parsed = parseExamRawText(pastedText, customFileName);
+
+      if (solveWithAi) {
+        setStatusMessage('AI verifying structure, naming exam & solving answer keys...');
+        try {
+          const res = await fetch('/api/enhance-exam', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ exam: parsed, providerConfig }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.document) {
+              onExamParsed(data.document);
+              return;
+            }
+          }
+        } catch (aiErr) {
+          console.warn('AI enhance failed, loading offline foundation:', aiErr);
+        }
+      }
 
       onExamParsed({
         ...parsed,

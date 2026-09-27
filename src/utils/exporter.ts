@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { ExamDocument, QuestionItem } from '../types/exam';
+import { getQuestionTypeInfo } from './questionTypeMapper';
 
 /**
  * Download a file in the browser safely.
@@ -61,14 +62,18 @@ function formatDocumentForJson(doc: ExamDocument) {
   return {
     metadata: {
       examId: doc.id,
-      examTitle: doc.header.courseName,
+      examTitle: doc.header.examName || doc.header.courseName,
+      officialCourseName: doc.header.courseName,
       school: doc.header.schoolName,
-      grade: doc.header.gradeAndMajor,
+      grade: doc.header.grade || doc.header.gradeAndMajor,
+      term: doc.header.term || null,
+      district: doc.header.district,
       date: doc.header.examDate,
       durationMinutes: doc.header.durationMinutes,
       totalQuestions: doc.totalQuestions,
       totalMarks: doc.totalMarks,
       parsedAt: doc.parsedAt,
+      isAiSolved: doc.isAiSolved,
     },
     sections: doc.sections.map((sec) => ({
       sectionRowId: sec.rowId,
@@ -91,38 +96,51 @@ function formatDocumentForJson(doc: ExamDocument) {
             words: sec.wordBank,
           }
         : null,
-      questions: sec.questions.map((q) => ({
+      questions: sec.questions.map((q) => {
+        const typeInfo = getQuestionTypeInfo(q.type);
+        return {
+          id: q.id,
+          number: q.number,
+          displayNumber: q.displayNumber,
+          type: q.type,
+          typeEnName: q.typeEnName || typeInfo.enName,
+          typeFaName: q.typeFaName || typeInfo.faName,
+          stem: q.stem,
+          options: q.options || null,
+          correctAnswer: q.correctAnswer || null,
+          mark: q.mark,
+          wordBankWords: q.wordBankWords || null,
+          parentContext:
+            q.parentContextType !== 'none'
+              ? {
+                  type: q.parentContextType,
+                  title: q.parentContextTitle,
+                  text: q.parentContextText || null,
+                  wordBankOptions: q.wordBankWords || null,
+                }
+              : null,
+        };
+      }),
+    })),
+    flatQuestionBank: getAllQuestions(doc).map((q) => {
+      const typeInfo = getQuestionTypeInfo(q.type);
+      return {
         id: q.id,
         number: q.number,
-        displayNumber: q.displayNumber,
+        section: q.sectionName,
+        row: q.sectionRowId,
         type: q.type,
+        typeEnName: q.typeEnName || typeInfo.enName,
+        typeFaName: q.typeFaName || typeInfo.faName,
         stem: q.stem,
-        options: q.options || null,
-        correctAnswer: q.correctAnswer || null,
+        options: q.options ? q.options.map((o) => `${o.id.toUpperCase()}: ${o.text}`).join(' | ') : null,
+        answer: q.correctAnswer || null,
         mark: q.mark,
-        parentContext:
-          q.parentContextType !== 'none'
-            ? {
-                type: q.parentContextType,
-                title: q.parentContextTitle,
-                textSnippet: q.parentContextText ? q.parentContextText.slice(0, 120) + '...' : null,
-                wordBankOptions: q.wordBankWords || null,
-              }
-            : null,
-      })),
-    })),
-    flatQuestionBank: getAllQuestions(doc).map((q) => ({
-      id: q.id,
-      number: q.number,
-      section: q.sectionName,
-      row: q.sectionRowId,
-      type: q.type,
-      stem: q.stem,
-      options: q.options ? q.options.map((o) => `${o.id.toUpperCase()}: ${o.text}`).join(' | ') : null,
-      answer: q.correctAnswer || null,
-      mark: q.mark,
-      parentContext: q.parentContextTitle || null,
-    })),
+        wordBankWords: q.wordBankWords || null,
+        linkedPassageText: q.parentContextText || null,
+        parentContext: q.parentContextTitle || null,
+      };
+    }),
   };
 }
 
@@ -138,12 +156,14 @@ export function exportToExcel(doc: ExamDocument): void {
     const optB = q.options?.find((o) => o.id === 'b')?.text || '';
     const optC = q.options?.find((o) => o.id === 'c')?.text || '';
     const optD = q.options?.find((o) => o.id === 'd')?.text || '';
+    const typeInfo = getQuestionTypeInfo(q.type);
 
     return {
       'No.': q.number,
       'Row ID': q.sectionRowId,
       Section: q.sectionName,
-      'Question Type': q.type,
+      'Question Type (EN)': q.typeEnName || typeInfo.enName,
+      'نوع سوال (FA)': q.typeFaName || typeInfo.faName,
       'Question Stem': q.stem,
       'Option A': optA,
       'Option B': optB,
@@ -151,7 +171,9 @@ export function exportToExcel(doc: ExamDocument): void {
       'Option D': optD,
       'Correct Answer': q.correctAnswer || '',
       'Mark (Points)': q.mark,
-      'Context / Passage / Bank': q.parentContextTitle || (q.wordBankWords ? q.wordBankWords.join(', ') : ''),
+      'Word Box Candidate Words': q.wordBankWords ? q.wordBankWords.join(', ') : '',
+      'Linked Passage / Reading Text': q.parentContextText || '',
+      'Context Title': q.parentContextTitle || '',
       'Has Image': q.hasImage ? 'Yes' : 'No',
       'Image Asset File': q.imageFileName || '',
       'Image Description': q.imageCaption || '',
@@ -181,10 +203,12 @@ export function exportToExcel(doc: ExamDocument): void {
 
   // Sheet 3: Exam Metadata
   const metadataRows = [
-    { Key: 'Exam Title', Value: doc.header.courseName },
+    { Key: 'AI Identified Exam Title', Value: doc.header.examName || doc.header.courseName },
+    { Key: 'Course Name', Value: doc.header.courseName },
     { Key: 'School', Value: doc.header.schoolName },
     { Key: 'District', Value: doc.header.district },
-    { Key: 'Grade / Major', Value: doc.header.gradeAndMajor },
+    { Key: 'Grade', Value: doc.header.grade || doc.header.gradeAndMajor },
+    { Key: 'Term / Exam Period', Value: doc.header.term || 'نوبت اول' },
     { Key: 'Exam Date', Value: doc.header.examDate },
     { Key: 'Duration (Mins)', Value: doc.header.durationMinutes },
     { Key: 'Total Questions', Value: doc.totalQuestions },
@@ -200,7 +224,8 @@ export function exportToExcel(doc: ExamDocument): void {
   const blob = new Blob([excelBuffer], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
-  downloadFile(blob, `${doc.id}_QuestionBank.xlsx`, blob.type);
+  const safeTitle = (doc.header.examName || doc.header.courseName).replace(/[^\w\u0600-\u06FF]/g, '_').slice(0, 30);
+  downloadFile(blob, `${safeTitle}_QuestionBank.xlsx`, blob.type);
 }
 
 /**
@@ -217,15 +242,18 @@ export function exportBatchToExcel(documents: ExamDocument[], customFilename?: s
       const optC = q.options?.find((o) => o.id === 'c')?.text || '';
       const optD = q.options?.find((o) => o.id === 'd')?.text || '';
 
+      const typeInfo = getQuestionTypeInfo(q.type);
       return {
         'Exam ID': doc.id,
-        'Exam Name': doc.header.courseName,
+        'Exam Name': doc.header.examName || doc.header.courseName,
         'School / Institution': doc.header.schoolName,
-        Grade: doc.header.gradeAndMajor,
+        Grade: doc.header.grade || doc.header.gradeAndMajor,
+        Term: doc.header.term || 'نوبت اول',
         'Question No.': q.number,
         'Row Letter': q.sectionRowId,
         Category: q.sectionName,
-        'Question Type': q.type,
+        'Question Type (EN)': q.typeEnName || typeInfo.enName,
+        'نوع سوال (FA)': q.typeFaName || typeInfo.faName,
         'Question Stem': q.stem,
         'Option A': optA,
         'Option B': optB,
@@ -233,6 +261,8 @@ export function exportBatchToExcel(documents: ExamDocument[], customFilename?: s
         'Option D': optD,
         'Correct Answer': q.correctAnswer || '',
         Mark: q.mark,
+        'Word Box Candidate Words': q.wordBankWords ? q.wordBankWords.join(', ') : '',
+        'Linked Passage Text': q.parentContextText || '',
         'Has Image': q.hasImage ? 'Yes' : 'No',
         'Image Asset File': q.imageFileName || '',
         'Image Description': q.imageCaption || '',
@@ -247,17 +277,23 @@ export function exportBatchToExcel(documents: ExamDocument[], customFilename?: s
 
   // Individual sheets per exam (cleanly truncated sheet names)
   documents.forEach((doc, idx) => {
-    const sheetName = `Exam_${idx + 1}_${doc.header.gradeAndMajor.replace(/[^\w]/g, '').slice(0, 10)}`;
-    const examQuestions = getAllQuestions(doc).map((q) => ({
-      'No.': q.number,
-      'Row ID': q.sectionRowId,
-      Section: q.sectionName,
-      Type: q.type,
-      Stem: q.stem,
-      'Answer Key': q.correctAnswer || '',
-      Mark: q.mark,
-      Context: q.parentContextTitle || '',
-    }));
+    const sheetName = `Exam_${idx + 1}_${(doc.header.grade || doc.header.gradeAndMajor).replace(/[^\w]/g, '').slice(0, 10)}`;
+    const examQuestions = getAllQuestions(doc).map((q) => {
+      const typeInfo = getQuestionTypeInfo(q.type);
+      return {
+        'No.': q.number,
+        'Row ID': q.sectionRowId,
+        Section: q.sectionName,
+        'Type (EN)': q.typeEnName || typeInfo.enName,
+        'نوع سوال': q.typeFaName || typeInfo.faName,
+        Stem: q.stem,
+        'Answer Key': q.correctAnswer || '',
+        Mark: q.mark,
+        'Word Box Words': q.wordBankWords ? q.wordBankWords.join(', ') : '',
+        'Linked Passage': q.parentContextText ? q.parentContextText.slice(0, 150) + '...' : '',
+        Context: q.parentContextTitle || '',
+      };
+    });
     const ws = XLSX.utils.json_to_sheet(examQuestions);
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
   });
@@ -265,10 +301,11 @@ export function exportBatchToExcel(documents: ExamDocument[], customFilename?: s
   // Batch Overview Sheet
   const overviewRows = documents.map((doc, idx) => ({
     '#': idx + 1,
-    'Exam Title': doc.header.courseName,
+    'AI Identified Exam Title': doc.header.examName || doc.header.courseName,
+    'Official Course': doc.header.courseName,
     School: doc.header.schoolName,
-    Grade: doc.header.gradeAndMajor,
-    'Date / Term': doc.header.examDate,
+    Grade: doc.header.grade || doc.header.gradeAndMajor,
+    'Date / Term': `${doc.header.examDate} - ${doc.header.term || 'نوبت اول'}`,
     'Total Questions': doc.totalQuestions,
     'Total Marks': doc.totalMarks,
     'Confidence Score': `${doc.confidenceScore}%`,
@@ -307,7 +344,8 @@ function formatQuestionsCsv(allQ: QuestionItem[]): string {
     'number',
     'row_id',
     'section',
-    'type',
+    'type_en',
+    'type_fa',
     'stem',
     'option_a',
     'option_b',
@@ -315,7 +353,9 @@ function formatQuestionsCsv(allQ: QuestionItem[]): string {
     'option_d',
     'correct_answer',
     'mark',
-    'parent_context',
+    'word_bank_words',
+    'linked_passage_text',
+    'parent_context_title',
   ];
 
   const escapeCsv = (str: string) => {
@@ -329,12 +369,14 @@ function formatQuestionsCsv(allQ: QuestionItem[]): string {
     const optB = q.options?.find((o) => o.id === 'b')?.text || '';
     const optC = q.options?.find((o) => o.id === 'c')?.text || '';
     const optD = q.options?.find((o) => o.id === 'd')?.text || '';
+    const typeInfo = getQuestionTypeInfo(q.type);
 
     return [
       q.number,
       escapeCsv(q.sectionRowId),
       escapeCsv(q.sectionName),
-      escapeCsv(q.type),
+      escapeCsv(q.typeEnName || typeInfo.enName),
+      escapeCsv(q.typeFaName || typeInfo.faName),
       escapeCsv(q.stem),
       escapeCsv(optA),
       escapeCsv(optB),
@@ -342,6 +384,8 @@ function formatQuestionsCsv(allQ: QuestionItem[]): string {
       escapeCsv(optD),
       escapeCsv(q.correctAnswer || ''),
       q.mark,
+      escapeCsv(q.wordBankWords ? q.wordBankWords.join(', ') : ''),
+      escapeCsv(q.parentContextText || ''),
       escapeCsv(q.parentContextTitle || ''),
     ].join(',');
   });

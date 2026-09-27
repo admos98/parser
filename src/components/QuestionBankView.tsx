@@ -16,6 +16,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { ExamDocument, QuestionItem, QuestionType } from '../types/exam';
+import { getQuestionTypeInfo } from '../utils/questionTypeMapper';
 
 interface QuestionBankViewProps {
   document: ExamDocument;
@@ -251,6 +252,17 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
               </div>
             )}
 
+            {/* Word Bank candidate words pill if present */}
+            {q.wordBankWords && q.wordBankWords.length > 0 && (
+              <div className="mt-2 flex items-center gap-1.5 text-xs text-amber-300 bg-amber-950/30 border border-amber-800/40 rounded-lg px-2.5 py-1 flex-wrap">
+                <Layers className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                <span className="font-semibold text-amber-200">Word Box Candidate Words:</span>
+                <span className="font-mono text-[11px] text-amber-300">
+                  [{q.wordBankWords.join(' • ')}]
+                </span>
+              </div>
+            )}
+
             {/* Parent Context Link Pill (Passage / Word Bank) */}
             {q.parentContextType !== 'none' && q.parentContextTitle && (
               <div className="mt-2 flex items-center gap-1.5 text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-800/50 rounded-lg px-2.5 py-1">
@@ -259,9 +271,9 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                 {q.parentContextText && (
                   <button
                     onClick={() => onSelectPassage(q.parentContextTitle || 'Passage', q.parentContextText || '')}
-                    className="ml-auto text-[11px] underline text-indigo-400 hover:text-indigo-200"
+                    className="ml-auto text-[11px] underline text-indigo-400 hover:text-indigo-200 font-medium"
                   >
-                    View Passage
+                    View Related Passage
                   </button>
                 )}
               </div>
@@ -360,36 +372,8 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
 };
 
 export function formatQuestionType(type: QuestionType | string): string {
-  switch (type) {
-    case 'multiple_choice':
-      return 'Multiple Choice';
-    case 'cloze_item':
-      return 'Cloze Gap';
-    case 'word_bank_fill':
-      return 'Word Bank Blank';
-    case 'fill_blank':
-      return 'Fill in Blank';
-    case 'matching':
-      return 'Column Matching';
-    case 'true_false':
-      return 'True / False';
-    case 'short_answer':
-      return 'Short Answer';
-    case 'unscramble':
-      return 'Sentence Unscramble';
-    case 'form_in_parentheses':
-      return 'Verb / Word Form';
-    case 'combine_sentences':
-      return 'Sentence Combination';
-    case 'active_passive':
-      return 'Active / Passive Voice';
-    case 'error_correction':
-      return 'Mistake Correction';
-    case 'letter_reorder':
-      return 'Letter Reorder / Spelling';
-    default:
-      return type;
-  }
+  const info = getQuestionTypeInfo(type as QuestionType);
+  return `${info.enName} • ${info.faName}`;
 }
 
 export function getTypeBadgeStyle(type: QuestionType | string): string {

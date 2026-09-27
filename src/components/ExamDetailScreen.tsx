@@ -99,10 +99,15 @@ export const ExamDetailScreen: React.FC<ExamDetailScreenProps> = ({
           </button>
 
           <div>
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
               <h1 className="text-base sm:text-lg font-extrabold text-white">
-                {document.header.courseName}
+                {document.header.examName || document.header.courseName}
               </h1>
+              {document.header.examName && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                  <Sparkles className="w-2.5 h-2.5 text-indigo-400" /> AI Exam Title
+                </span>
+              )}
               {isSolved ? (
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                   <CheckCircle2 className="w-3 h-3" /> Stage 2: AI-Solved
@@ -114,10 +119,17 @@ export const ExamDetailScreen: React.FC<ExamDetailScreenProps> = ({
               )}
             </div>
 
-            <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
-              <span>{document.header.schoolName}</span>
+            <div className="flex items-center gap-2 text-xs text-slate-400 mt-1 flex-wrap">
+              <span className="font-semibold text-slate-300">{document.header.schoolName}</span>
               <span>•</span>
-              <span>{document.header.gradeAndMajor}</span>
+              <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[11px] font-medium border border-slate-700">
+                {document.header.grade || document.header.gradeAndMajor}
+              </span>
+              {document.header.term && (
+                <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[11px] font-medium border border-slate-700">
+                  نوبت: {document.header.term}
+                </span>
+              )}
               <span>•</span>
               <span className="font-mono text-slate-500">{document.filename}</span>
             </div>

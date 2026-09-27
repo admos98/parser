@@ -8,6 +8,7 @@ import {
   ExamOption,
 } from '../types/exam';
 import { normalizeOcrText } from './ocrPreprocessor';
+import { getQuestionTypeInfo, inferQuestionTypeFromText } from './questionTypeMapper';
 
 export interface ParseOptions {
   detectAnomalies?: boolean;
@@ -647,21 +648,32 @@ function extractQuestionsFromText(
     }
 
     // Context attachment
-    let parentContextType: 'word_bank' | 'cloze_passage' | 'reading_passage' | 'none' = 'none';
+    let parentContextType: 'word_bank' | 'cloze_passage' | 'reading_passage' | 'image_prompt' | 'dialogue_context' | 'none' = 'none';
     let parentContextTitle: string | undefined;
+    let parentContextText: string | undefined;
 
     if (type === 'word_bank_fill' || (wordBank.length > 0 && (type === 'fill_blank' || type === 'short_answer'))) {
       type = 'word_bank_fill';
       parentContextType = 'word_bank';
       parentContextTitle = `Word Bank (${rowId})`;
+      parentContextText = `Candidate Words: [${wordBank.join(', ')}]`;
     } else if (passageText && passageText.length > 20) {
       const isCloze = /cloze/i.test(passageText) || /\[\d+\]/.test(passageText);
       if (isCloze && type === 'multiple_choice') {
         type = 'cloze_item';
       }
       parentContextType = isCloze ? 'cloze_passage' : 'reading_passage';
-      parentContextTitle = `Passage (${rowId})`;
+      parentContextTitle = isCloze ? `Cloze Passage (${rowId})` : `Reading Passage (${rowId})`;
+      parentContextText = passageText;
     }
+
+    const hasImage = /تصویر|عکس|picture|image|look at the/i.test(stem);
+    if (hasImage && parentContextType === 'none') {
+      parentContextType = 'image_prompt';
+      parentContextTitle = `Image Prompt (${rowId})`;
+    }
+
+    const typeInfo = getQuestionTypeInfo(type);
 
     if (stem.length < 4) {
       anomalies.push({
@@ -684,12 +696,16 @@ function extractQuestionsFromText(
       sectionRowId: rowId,
       sectionName: category,
       type,
+      typeEnName: typeInfo.enName,
+      typeFaName: typeInfo.faName,
       stem,
       options: optionsList,
       mark: qMark,
       parentContextType,
       parentContextTitle,
-      wordBankWords: wordBank.length ? wordBank : undefined,
+      parentContextText,
+      wordBankWords: wordBank.length ? [...wordBank] : undefined,
+      hasImage,
     });
   }
 

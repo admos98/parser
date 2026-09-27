@@ -6,6 +6,7 @@ export type QuestionType =
   | 'matching'
   | 'true_false'
   | 'short_answer'
+  | 'long_answer_essay'
   | 'unscramble'
   | 'form_in_parentheses'
   | 'combine_sentences'
@@ -13,7 +14,14 @@ export type QuestionType =
   | 'error_correction'
   | 'letter_reorder'
   | 'inline_choice'
-  | 'dialogue_response';
+  | 'dialogue_response'
+  | 'odd_one_out'
+  | 'phonetic_pronunciation'
+  | 'sentence_ordering'
+  | 'picture_description'
+  | 'translation'
+  | 'definition_matching'
+  | 'numerical_calculation';
 
 export interface ExamOption {
   id: string; // 'a', 'b', 'c', 'd'
@@ -35,17 +43,19 @@ export interface QuestionItem {
   sectionRowId: string; // e.g. 'A', 'B', 'D', 'P', 'Q'
   sectionName: string; // 'Listening', 'Vocabulary', 'Grammar', 'Writing', 'Reading'
   type: QuestionType;
+  typeEnName?: string; // e.g. "Multiple Choice (MCQ)", "Word Bank Fill"
+  typeFaName?: string; // e.g. "چهار گزینه‌ای (تستی)", "جای خالی با جعبه واژگان"
   stem: string;
   persianInstruction?: string;
   englishInstruction?: string;
   options?: ExamOption[];
   correctAnswer?: string;
   mark: number;
-  // Parent links
-  parentContextType?: 'word_bank' | 'cloze_passage' | 'reading_passage' | 'matching_table' | 'none';
+  // Parent links & Context
+  parentContextType?: 'word_bank' | 'cloze_passage' | 'reading_passage' | 'matching_table' | 'image_prompt' | 'dialogue_context' | 'listening_audio' | 'none';
   parentContextTitle?: string;
   parentContextText?: string;
-  wordBankWords?: string[];
+  wordBankWords?: string[]; // Candidate words from box available to this question
   // Match-specific
   matchingPairs?: MatchingPair[];
   matchingDistractors?: string[];

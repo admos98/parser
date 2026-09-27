@@ -7,9 +7,10 @@ import {
   BookOpen,
   CheckCircle,
   HelpCircle,
+  Layers,
 } from 'lucide-react';
 import { QuestionItem, QuestionType } from '../types/exam';
-import { formatQuestionType } from './QuestionBankView';
+import { QUESTION_TYPE_REGISTRY, getQuestionTypeInfo } from '../utils/questionTypeMapper';
 
 interface QuestionDetailModalProps {
   question: QuestionItem;
@@ -29,6 +30,10 @@ export const QuestionDetailModal: React.FC<QuestionDetailModalProps> = ({
   const [options, setOptions] = useState(question.options || []);
   const [persianInstruction, setPersianInstruction] = useState(question.persianInstruction || '');
   const [parentContextTitle, setParentContextTitle] = useState(question.parentContextTitle || '');
+  const [parentContextText, setParentContextText] = useState(question.parentContextText || '');
+  const [wordBankWordsStr, setWordBankWordsStr] = useState(
+    question.wordBankWords ? question.wordBankWords.join(', ') : '',
+  );
 
   const handleAddOption = () => {
     const nextId = String.fromCharCode(97 + options.length); // a, b, c, d...
@@ -47,15 +52,25 @@ export const QuestionDetailModal: React.FC<QuestionDetailModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const typeInfo = getQuestionTypeInfo(type);
+    const parsedWordBank = wordBankWordsStr
+      .split(/[,،]+/)
+      .map((w) => w.trim())
+      .filter(Boolean);
+
     onSave({
       ...question,
       stem,
       type,
+      typeEnName: typeInfo.enName,
+      typeFaName: typeInfo.faName,
       mark,
       correctAnswer: correctAnswer || undefined,
       options: options.length ? options : undefined,
       persianInstruction: persianInstruction || undefined,
       parentContextTitle: parentContextTitle || undefined,
+      parentContextText: parentContextText || undefined,
+      wordBankWords: parsedWordBank.length ? parsedWordBank : undefined,
       reviewed: true,
     });
     onClose();
@@ -89,24 +104,20 @@ export const QuestionDetailModal: React.FC<QuestionDetailModalProps> = ({
         <form onSubmit={handleSubmit} className="p-5 flex-1 overflow-y-auto space-y-4 text-xs">
           {/* Row 1: Type, Mark, Parent Context */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-slate-400 font-medium mb-1">Question Type</label>
+            <div className="sm:col-span-1">
+              <label className="block text-slate-400 font-medium mb-1">
+                Question Type (Bilingual)
+              </label>
               <select
                 value={type}
                 onChange={(e) => setType(e.target.value as QuestionType)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500"
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500 text-[11px]"
               >
-                <option value="multiple_choice">Multiple Choice</option>
-                <option value="cloze_item">Cloze Item</option>
-                <option value="word_bank_fill">Word Bank Blank</option>
-                <option value="fill_blank">Fill Blank</option>
-                <option value="matching">Matching</option>
-                <option value="true_false">True / False</option>
-                <option value="short_answer">Short Answer</option>
-                <option value="unscramble">Unscramble</option>
-                <option value="form_in_parentheses">Form in Parentheses</option>
-                <option value="error_correction">Error Correction</option>
-                <option value="letter_reorder">Letter Reorder</option>
+                {Object.values(QUESTION_TYPE_REGISTRY).map((qt) => (
+                  <option key={qt.type} value={qt.type}>
+                    {qt.enName} ({qt.faName})
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -144,26 +155,47 @@ export const QuestionDetailModal: React.FC<QuestionDetailModalProps> = ({
             />
           </div>
 
-          {/* Persian Instruction */}
-          <div>
-            <label className="block text-slate-400 font-medium mb-1">Persian Instruction (Optional)</label>
-            <input
-              type="text"
-              value={persianInstruction}
-              onChange={(e) => setPersianInstruction(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 font-persian focus:outline-none focus:border-indigo-500"
-            />
-          </div>
+          {/* Word Bank Words (Available for this question) */}
+          {(type === 'word_bank_fill' || wordBankWordsStr) && (
+            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-1">
+              <label className="block text-amber-300 font-bold mb-1 flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-amber-400" />
+                Word Box Candidate Words (Comma-Separated)
+              </label>
+              <input
+                type="text"
+                value={wordBankWordsStr}
+                onChange={(e) => setWordBankWordsStr(e.target.value)}
+                placeholder="e.g. compiled, appreciate, effectively, founded"
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-amber-500"
+              />
+              <p className="text-[10px] text-slate-400">
+                These candidate words are saved directly to this question and exported to Excel/JSON.
+              </p>
+            </div>
+          )}
 
-          {/* Parent Context Title */}
+          {/* Linked Parent Passage / Paragraph Text */}
           <div>
-            <label className="block text-slate-400 font-medium mb-1">Linked Parent Context / Passage</label>
-            <input
-              type="text"
-              value={parentContextTitle}
-              onChange={(e) => setParentContextTitle(e.target.value)}
-              placeholder="e.g. Cloze Passage: Zakaria al-Razi"
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-none focus:border-indigo-500"
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-slate-400 font-medium flex items-center gap-1.5">
+                <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
+                Linked Passage / Reading Paragraph Text
+              </label>
+              <input
+                type="text"
+                value={parentContextTitle}
+                onChange={(e) => setParentContextTitle(e.target.value)}
+                placeholder="Passage title (e.g. Reading 1: Edison)"
+                className="bg-slate-950 border border-slate-800 rounded px-2 py-0.5 text-[11px] text-slate-300 w-48"
+              />
+            </div>
+            <textarea
+              rows={3}
+              value={parentContextText}
+              onChange={(e) => setParentContextText(e.target.value)}
+              placeholder="Paste or edit the full related paragraph or reading passage text..."
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-[11px]"
             />
           </div>
 
